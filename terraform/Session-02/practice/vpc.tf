@@ -6,38 +6,6 @@ resource "aws_vpc" "main" {
   }
 }
 
-
-# resource "aws_subnet" "az1a" {
-#   vpc_id     = aws_vpc.main.id
-#   cidr_block = "10.0.0.0/25"
-#   availability_zone = "us-east-2a"
-
-#   tags = {
-#     Name = "private-subnet-2a"
-#   }
-# }
-
-
-# resource "aws_subnet" "az1b" {
-#   vpc_id     = aws_vpc.main.id
-#   cidr_block = "10.0.0.128/25"
-# availability_zone = "us-east-2b"
-
-#   tags = {
-#     Name = "private-subnet-2b"
-#   }
-# }
-
-# resource "aws_subnet" "az1c" {
-#   vpc_id     = aws_vpc.main.id
-#   cidr_block = "10.0.1.0/25"
-# availability_zone = "us-east-2c"
-
-#   tags = {
-#     Name = "private-subnet-2c"
-#   }
-# }
-
 locals {
   private_subnets = {
     "a" = {cidr_block = "10.0.0.0/25", az = "us-east-2a", name="private-subnet-2a" }
@@ -51,7 +19,7 @@ locals {
   }
 }
 
-resource "aws_subnet" "subnets" {
+resource "aws_subnet" "pri_subnets" {
   for_each = local.private_subnets
 
   vpc_id = aws_vpc.main.id
@@ -93,7 +61,9 @@ resource "aws_internet_gateway" "igw" {
 }
 
 
+
 resource "aws_route_table" "public-rt" {
+  for_each = aws_subnet.pub_subnets
   vpc_id = aws_vpc.main.id
 
   route {
@@ -108,30 +78,18 @@ resource "aws_route_table" "public-rt" {
   }
 }
 
+resource "aws_route_table_association" "public" {
+ for_each = aws_subnet.pub_subnets
+ subnet_id = aws_subnet.pub_subnets[each.key].id
+ route_table_id = aws_route_table.public-rt[each.key].id
+  
+}
 
-# resource "aws_eip" "auto-eip" {
 
-# }
-
-# resource "aws_nat_gateway" "example" {
-#   allocation_id = aws_eip.auto-eip.id
-#   subnet_id     = aws_subnet.subnets.id
-
-#   tags = {
-#     Name = "natgw"
-#     Environment = "Production"
-#     Project = "AI"
-#   }
-
-#   # To ensure proper ordering, it is recommended to add an explicit dependency
-#   # on the Internet Gateway for the VPC.
-#   depends_on = [aws_internet_gateway.igw]
-# }
 
 resource "aws_eip" "nat_gw" {
   for_each = local.private_subnets
 
-#   domain = "vpc"
 
   tags = {
     Name = "eip-${each.value.name}"
@@ -144,7 +102,7 @@ resource "aws_nat_gateway" "nat_gw" {
   for_each = local.private_subnets
   
   allocation_id = aws_eip.nat_gw[each.key].id
-  subnet_id = aws_subnet.subnets[each.key].id
+  subnet_id = aws_subnet.pri_subnets[each.key].id
 
   tags = {
     Name = "NAT-gw-${each.value.name}"
@@ -153,3 +111,26 @@ resource "aws_nat_gateway" "nat_gw" {
   }
 }
 
+
+resource "aws_route_table" "private-rt" {
+  for_each = aws_subnet.pri_subnets
+  vpc_id = aws_vpc.main.id
+
+  route {
+    cidr_block = "0.0.0.0/0"
+    nat_gateway_id = aws_nat_gateway.nat_gw[each.key].id
+  }
+
+  tags = {
+    Name = "private-route"
+    Environment = "Production"
+    Project = "AI"
+  }
+}
+
+resource "aws_route_table_association" "private" {
+ for_each = aws_subnet.pri_subnets
+ subnet_id = aws_subnet.pri_subnets[each.key].id
+ route_table_id = aws_route_table.private-rt[each.key].id
+  
+}
